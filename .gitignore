@@ -1,0 +1,25 @@
+# Documentation files (for submission only, not versioned)
+EVIDENCIAS.md
+QUICKSTART.md
+README.md
+
+# Evidence screenshots
+evidencias/
+*.png
+*.jpg
+*.jpeg
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.bak
