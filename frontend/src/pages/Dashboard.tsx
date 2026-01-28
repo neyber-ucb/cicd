@@ -25,9 +25,9 @@ const Dashboard: React.FC = () => {
       const data = await tasksAPI.getTasks();
       setTasks(data);
       setError('');
-    } catch (err: any) {
+    } catch (error) {
       setError('Failed to load tasks');
-      console.error(err);
+      console.error(error);
     } finally {
       setIsLoading(false);
     }
@@ -42,9 +42,9 @@ const Dashboard: React.FC = () => {
       setTasks([...tasks, created]);
       setNewTask({ title: '', description: '', completed: false });
       setShowAddForm(false);
-    } catch (err: any) {
+    } catch (error) {
       setError('Failed to create task');
-      console.error(err);
+      console.error(error);
     }
   };
 
@@ -53,9 +53,9 @@ const Dashboard: React.FC = () => {
       const updated = await tasksAPI.updateTask(id, updates);
       setTasks(tasks.map(task => task.id === id ? updated : task));
       setEditingTask(null);
-    } catch (err: any) {
+    } catch (error) {
       setError('Failed to update task');
-      console.error(err);
+      console.error(error);
     }
   };
 
@@ -69,9 +69,9 @@ const Dashboard: React.FC = () => {
     try {
       await tasksAPI.deleteTask(id);
       setTasks(tasks.filter(task => task.id !== id));
-    } catch (err: any) {
+    } catch (error) {
       setError('Failed to delete task');
-      console.error(err);
+      console.error(error);
     }
   };
 
@@ -201,7 +201,7 @@ const Dashboard: React.FC = () => {
                     />
                     <textarea
                       value={editingTask.description ?? ''}
-                      onChange={(e) => setEditingTask({ ...editingTask, description: e.target.value || undefined })}
+                      onChange={(e) => setEditingTask({ ...editingTask, description: e.target.value || null })}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
                       rows={3}
                     />
@@ -209,7 +209,7 @@ const Dashboard: React.FC = () => {
                       <button
                         onClick={() => handleUpdateTask(task.id, {
                           title: editingTask.title,
-                          description: editingTask.description
+                          description: editingTask.description ?? undefined
                         })}
                         className="flex items-center space-x-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition"
                       >
