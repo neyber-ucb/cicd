@@ -4,11 +4,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base, get_db
-from main import app
+from app.models.task import Task  # noqa: F401
 
 # Import models to ensure they're registered with Base
 from app.models.user import User  # noqa: F401
-from app.models.task import Task  # noqa: F401
+from main import app
 
 
 @pytest.fixture(scope="function")
