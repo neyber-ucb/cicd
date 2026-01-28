@@ -16,17 +16,13 @@ def test_db():
     """Create a test database session with fresh tables for each test"""
     # Use in-memory SQLite for tests
     test_database_url = "sqlite:///:memory:"
-    
+
     engine = create_engine(test_database_url, connect_args={"check_same_thread": False})
-    
+
     # Create all tables
     Base.metadata.create_all(bind=engine)
-    
-    TestingSessionLocal = sessionmaker(
-        autocommit=False,
-        autoflush=False,
-        bind=engine
-    )
+
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
     db = TestingSessionLocal()
 
