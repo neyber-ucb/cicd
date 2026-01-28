@@ -716,33 +716,212 @@ npm run test:coverage
 
 ### Para la Entrega:
 
-1. **Pipeline CI en verde** ✅
-   - Captura de GitHub Actions con todos los checks pasando
-   - Mostrar los 5 jobs principales + ci_success
+#### 1. **Pipeline CI en verde** ✅
 
-2. **Pipeline CI fallando** ❌
-   - Captura de un PR con CI fallando
-   - Mostrar el error específico (ej: Black formatting)
+**Cómo obtener:**
+1. Ve a: `https://github.com/neyber-ucb/cicd/actions`
+2. Haz clic en el workflow run más reciente
+3. Captura mostrando los 6 jobs:
+   - ✅ backend_quality
+   - ✅ backend_tests
+   - ✅ frontend_lint
+   - ✅ frontend_tests
+   - ✅ frontend_build
+   - ✅ ci_success
 
-3. **Corrección del fallo** ✅
-   - Captura del mismo PR después de corregir
-   - Todos los checks en verde
+**Qué debe mostrar la captura:**
+- Todos los checks en verde
+- Tiempo de ejecución de cada job
+- Estado "Success" o "✓" para cada uno
 
-4. **Protección de rama main**
-   - Captura de Settings → Branches
-   - Mostrar reglas configuradas
+---
 
-5. **Pull Request con template**
-   - Captura de un PR usando el template
-   - Mostrar checkboxes completados
+#### 2. **Pipeline CI fallando** ❌
 
-6. **Tests ejecutados localmente**
-   - Terminal mostrando pytest con coverage
-   - Terminal mostrando npm test
+**Cómo obtener:**
+```bash
+# Crear rama de demo con error intencional
+git checkout -b feature/demo-fallo
+echo "def broken_function(  ):pass" >> backend/app/demo.py
+git add .
+git commit -m "ci: break pipeline intentionally"
+git push origin feature/demo-fallo
+```
 
-7. **Health endpoint funcionando**
-   - Captura de respuesta del endpoint
-   - Mostrar status: healthy y database: connected
+Luego:
+1. Crea un PR desde `feature/demo-fallo` a `main`
+2. Espera a que CI falle
+3. Captura mostrando:
+   - ❌ backend_quality (FAILED)
+   - El error específico de Black formatting
+   - Logs del error
+
+**Qué debe mostrar la captura:**
+- Job fallido en rojo
+- Mensaje de error: "would reformat backend/app/demo.py"
+- Detalles del fallo en los logs
+
+---
+
+#### 3. **Corrección del fallo** ✅
+
+**Cómo obtener:**
+```bash
+# Corregir el error
+rm backend/app/demo.py
+git add .
+git commit -m "ci: fix formatting issues"
+git push origin feature/demo-fallo
+```
+
+Luego:
+1. Regresa al mismo PR
+2. Espera a que CI pase
+3. Captura mostrando:
+   - ✅ Todos los checks en verde
+   - Historial de commits mostrando la corrección
+   - "All checks have passed"
+
+**Qué debe mostrar la captura:**
+- Mismo PR, ahora con checks verdes
+- Botón "Merge" habilitado
+- Mensaje de éxito
+
+---
+
+#### 4. **Protección de rama main**
+
+**Cómo obtener:**
+1. Ve a: `https://github.com/neyber-ucb/cicd/settings/branches`
+2. Configura la protección para `main`:
+   - Require a pull request before merging
+   - Require status checks to pass:
+     - backend_quality
+     - backend_tests
+     - frontend_lint
+     - frontend_tests
+     - frontend_build
+   - Require conversation resolution
+   - Do not allow bypassing
+
+3. Captura mostrando todas las reglas configuradas
+
+**Qué debe mostrar la captura:**
+- Branch name pattern: `main`
+- Checkboxes marcados para todas las protecciones
+- Lista de status checks requeridos
+
+---
+
+#### 5. **Pull Request con template**
+
+**Cómo obtener:**
+1. Crea un nuevo PR (o usa el existente)
+2. El template se carga automáticamente
+3. Completa todos los campos:
+   - Marca el tipo de cambio (feat/fix/ci)
+   - Completa la descripción
+   - Marca todos los checkboxes de evidencia
+   - Completa sección de riesgo/rollback
+
+4. Captura mostrando el PR completo con template
+
+**Qué debe mostrar la captura:**
+- Template completo visible
+- Checkboxes marcados
+- Descripción completada
+- Comandos ejecutados localmente
+
+---
+
+#### 6. **Tests ejecutados localmente**
+
+**Backend - Cómo obtener:**
+```bash
+cd backend
+uv run pytest --cov=app --cov-report=term-missing
+```
+
+**Captura debe mostrar:**
+- Comando ejecutado
+- Tests passing: "14 passed"
+- Coverage: "70%"
+- Lista de archivos con coverage
+
+**Frontend - Cómo obtener:**
+```bash
+cd frontend
+npm run test
+```
+
+**Captura debe mostrar:**
+- Comando ejecutado
+- "Test Files  2 passed (2)"
+- "Tests  11 passed (11)"
+- Tiempo de ejecución
+
+---
+
+#### 7. **Health endpoint funcionando**
+
+**Cómo obtener:**
+```bash
+# Iniciar el servidor backend
+cd backend
+uv run uvicorn main:app --reload
+
+# En otra terminal, hacer request
+curl http://localhost:8000/api/health
+```
+
+**O usando el navegador:**
+1. Abre: `http://localhost:8000/api/health`
+2. Captura la respuesta JSON
+
+**Qué debe mostrar la captura:**
+```json
+{
+  "status": "healthy",
+  "database": "connected"
+}
+```
+
+**Alternativa con Postman/Insomnia:**
+- GET request a `/api/health`
+- Status code: 200
+- Response body mostrando status y database
+
+---
+
+### 📸 Resumen de Capturas Necesarias
+
+| # | Evidencia | Ubicación | Estado |
+|---|-----------|-----------|--------|
+| 1 | CI Pipeline Verde | GitHub Actions | ⬜ Pendiente |
+| 2 | CI Pipeline Fallando | GitHub PR | ⬜ Pendiente |
+| 3 | CI Pipeline Corregido | GitHub PR | ⬜ Pendiente |
+| 4 | Branch Protection | GitHub Settings | ⬜ Pendiente |
+| 5 | PR con Template | GitHub PR | ⬜ Pendiente |
+| 6 | Tests Backend Local | Terminal | ⬜ Pendiente |
+| 7 | Tests Frontend Local | Terminal | ⬜ Pendiente |
+| 8 | Health Endpoint | Browser/curl | ⬜ Pendiente |
+
+### 💡 Tips para las Capturas
+
+1. **Usa herramientas de captura:**
+   - macOS: `Cmd + Shift + 4` (selección)
+   - Windows: `Win + Shift + S`
+   - Linux: `gnome-screenshot` o `flameshot`
+
+2. **Asegúrate de mostrar:**
+   - URL completa en el navegador
+   - Timestamp cuando sea relevante
+   - Nombres de archivos/comandos completos
+
+3. **Organiza las capturas:**
+   - Nombra los archivos: `01-ci-verde.png`, `02-ci-fallo.png`, etc.
+   - Crea una carpeta `evidencias/` en el proyecto
+   - Agrégalas al documento final de entrega
 
 ---
 
