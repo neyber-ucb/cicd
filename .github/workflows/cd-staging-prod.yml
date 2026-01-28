@@ -1,0 +1,287 @@
+name: CD - Staging + Production
+
+on:
+  push:
+    branches: ["master"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  RELEASE_ID: ${{ github.sha }}-${{ github.run_number }}
+
+jobs:
+  build:
+    name: Build Release Artifact
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+      
+      - name: Build backend
+        working-directory: ./backend
+        run: |
+          uv sync --frozen
+          uv export --no-dev > requirements.txt
+      
+      - name: Build frontend
+        working-directory: ./frontend
+        run: |
+          npm ci
+          npm run build
+      
+      - name: Create release metadata
+        run: |
+          echo "RELEASE_ID=${{ env.RELEASE_ID }}" > RELEASE_INFO
+          echo "COMMIT_SHA=${{ github.sha }}" >> RELEASE_INFO
+          echo "COMMIT_MSG=$(git log -1 --pretty=%B)" >> RELEASE_INFO
+          echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> RELEASE_INFO
+          echo "GITHUB_REF=${{ github.ref }}" >> RELEASE_INFO
+          echo "GITHUB_ACTOR=${{ github.actor }}" >> RELEASE_INFO
+      
+      - name: Package release artifact
+        run: |
+          mkdir -p release
+          cp -r backend release/
+          cp -r frontend/dist release/frontend-dist
+          cp RELEASE_INFO release/
+          tar -czf release-${{ env.RELEASE_ID }}.tar.gz release/
+      
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ env.RELEASE_ID }}
+          path: release-${{ env.RELEASE_ID }}.tar.gz
+          retention-days: 30
+
+  deploy_staging:
+    name: Deploy to Staging
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    environment: staging
+    needs: [build]
+    
+    steps:
+      - name: Download release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-${{ env.RELEASE_ID }}
+      
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.STAGING_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.STAGING_HOST }} >> ~/.ssh/known_hosts
+      
+      - name: Deploy to staging server
+        run: |
+          RELEASE="${{ env.RELEASE_ID }}"
+          
+          # Create release directory
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }} \
+            "mkdir -p /var/www/taskmanager/releases/$RELEASE"
+          
+          # Upload artifact
+          scp -i ~/.ssh/deploy_key release-${{ env.RELEASE_ID }}.tar.gz \
+            ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }}:/var/www/taskmanager/releases/$RELEASE/
+          
+          # Extract and setup
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }} << 'ENDSSH'
+            cd /var/www/taskmanager/releases/$RELEASE
+            tar -xzf release-${{ env.RELEASE_ID }}.tar.gz
+            mv release/* .
+            rmdir release
+            rm release-${{ env.RELEASE_ID }}.tar.gz
+            
+            # Setup shared directories
+            mkdir -p /var/www/taskmanager/shared
+            ln -sfn /var/www/taskmanager/shared/.env backend/.env
+            
+            # Install backend dependencies
+            cd backend
+            python3 -m venv venv
+            source venv/bin/activate
+            pip install -r requirements.txt
+            
+            # Run migrations
+            alembic upgrade head || echo "No migrations to run"
+            
+            # Atomic symlink switch
+            ln -sfn /var/www/taskmanager/releases/$RELEASE /var/www/taskmanager/current
+            
+            # Restart services
+            sudo systemctl restart taskmanager-backend
+            sudo systemctl restart taskmanager-frontend
+          ENDSSH
+      
+      - name: Health check staging
+        run: |
+          sleep 5
+          curl -f "${{ secrets.STAGING_APP_URL }}/api/health" || exit 1
+          echo "✅ Staging deployment successful"
+      
+      - name: Notify deployment
+        if: always()
+        run: |
+          echo "Staging deployment completed for release ${{ env.RELEASE_ID }}"
+
+  deploy_production:
+    name: Deploy to Production
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: production
+    needs: [build, deploy_staging]
+    
+    steps:
+      - name: Download release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-${{ env.RELEASE_ID }}
+      
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.PROD_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.PROD_HOST }} >> ~/.ssh/known_hosts
+      
+      - name: Deploy to production server
+        run: |
+          RELEASE="${{ env.RELEASE_ID }}"
+          
+          # Create release directory
+          ssh -i ~/.ssh/deploy_key ${{ secrets.PROD_USER }}@${{ secrets.PROD_HOST }} \
+            "mkdir -p /var/www/taskmanager/releases/$RELEASE"
+          
+          # Upload artifact
+          scp -i ~/.ssh/deploy_key release-${{ env.RELEASE_ID }}.tar.gz \
+            ${{ secrets.PROD_USER }}@${{ secrets.PROD_HOST }}:/var/www/taskmanager/releases/$RELEASE/
+          
+          # Extract and setup
+          ssh -i ~/.ssh/deploy_key ${{ secrets.PROD_USER }}@${{ secrets.PROD_HOST }} << 'ENDSSH'
+            cd /var/www/taskmanager/releases/$RELEASE
+            tar -xzf release-${{ env.RELEASE_ID }}.tar.gz
+            mv release/* .
+            rmdir release
+            rm release-${{ env.RELEASE_ID }}.tar.gz
+            
+            # Setup shared directories
+            mkdir -p /var/www/taskmanager/shared
+            ln -sfn /var/www/taskmanager/shared/.env backend/.env
+            
+            # Install backend dependencies
+            cd backend
+            python3 -m venv venv
+            source venv/bin/activate
+            pip install -r requirements.txt
+            
+            # Run migrations
+            alembic upgrade head || echo "No migrations to run"
+            
+            # Atomic symlink switch
+            ln -sfn /var/www/taskmanager/releases/$RELEASE /var/www/taskmanager/current
+            
+            # Restart services
+            sudo systemctl restart taskmanager-backend
+            sudo systemctl restart taskmanager-frontend
+          ENDSSH
+      
+      - name: Health check production
+        run: |
+          sleep 5
+          curl -f "${{ secrets.PROD_APP_URL }}/api/health" || exit 1
+          echo "✅ Production deployment successful"
+      
+      - name: Notify deployment
+        if: always()
+        run: |
+          echo "Production deployment completed for release ${{ env.RELEASE_ID }}"
+          echo "Approved by: ${{ github.actor }}"
+
+  rollback_staging:
+    name: Rollback Staging
+    if: failure() && needs.deploy_staging.result == 'failure'
+    runs-on: ubuntu-latest
+    needs: [deploy_staging]
+    
+    steps:
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.STAGING_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.STAGING_HOST }} >> ~/.ssh/known_hosts
+      
+      - name: Rollback to previous release
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }} << 'ENDSSH'
+            cd /var/www/taskmanager/releases
+            PREV=$(ls -1dt */ | sed -n '2p' | tr -d '/')
+            
+            if [ -n "$PREV" ]; then
+              echo "Rolling back to: $PREV"
+              ln -sfn /var/www/taskmanager/releases/$PREV /var/www/taskmanager/current
+              sudo systemctl restart taskmanager-backend
+              sudo systemctl restart taskmanager-frontend
+              echo "✅ Rollback successful"
+            else
+              echo "❌ No previous release found"
+              exit 1
+            fi
+          ENDSSH
+      
+      - name: Verify rollback
+        run: |
+          sleep 5
+          curl -f "${{ secrets.STAGING_APP_URL }}/api/health" || exit 1
+
+  rollback_production:
+    name: Rollback Production
+    if: failure() && needs.deploy_production.result == 'failure'
+    runs-on: ubuntu-latest
+    needs: [deploy_production]
+    
+    steps:
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.PROD_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.PROD_HOST }} >> ~/.ssh/known_hosts
+      
+      - name: Rollback to previous release
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.PROD_USER }}@${{ secrets.PROD_HOST }} << 'ENDSSH'
+            cd /var/www/taskmanager/releases
+            PREV=$(ls -1dt */ | sed -n '2p' | tr -d '/')
+            
+            if [ -n "$PREV" ]; then
+              echo "Rolling back to: $PREV"
+              ln -sfn /var/www/taskmanager/releases/$PREV /var/www/taskmanager/current
+              sudo systemctl restart taskmanager-backend
+              sudo systemctl restart taskmanager-frontend
+              echo "✅ Rollback successful"
+            else
+              echo "❌ No previous release found"
+              exit 1
+            fi
+          ENDSSH
+      
+      - name: Verify rollback
+        run: |
+          sleep 5
+          curl -f "${{ secrets.PROD_APP_URL }}/api/health" || exit 1
