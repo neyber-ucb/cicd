@@ -1,7 +1,6 @@
 import logging
 import os
 from datetime import datetime
-from typing import Optional
 
 # Get release info from environment or file
 RELEASE_ID = os.getenv("RELEASE_ID", "dev")
@@ -34,7 +33,7 @@ def setup_logging():
 
 
 def log_user_action(
-    action: str, user_id: int, details: Optional[dict] = None, logger=None
+    action: str, user_id: int, details: dict | None = None, logger=None
 ):
     """Log user actions with context"""
     if logger is None:
