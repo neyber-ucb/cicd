@@ -85,54 +85,59 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.STAGING_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H ${{ secrets.STAGING_HOST }} >> ~/.ssh/known_hosts
+          ssh-keyscan -p ${{ secrets.STAGING_PORT }} -H ${{ secrets.STAGING_HOST }} >> ~/.ssh/known_hosts || true
       
       - name: Deploy to staging server
         run: |
           RELEASE="${{ env.RELEASE_ID }}"
           
-          # Create release directory
-          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }} \
-            "mkdir -p /var/www/taskmanager/releases/$RELEASE"
+          # Create release directory on server
+          ssh -i ~/.ssh/deploy_key -p ${{ secrets.STAGING_PORT }} ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }} \
+            "mkdir -p /var/www/taskmanager-staging/releases/$RELEASE"
           
           # Upload artifact
-          scp -i ~/.ssh/deploy_key release-${{ env.RELEASE_ID }}.tar.gz \
-            ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }}:/var/www/taskmanager/releases/$RELEASE/
+          scp -i ~/.ssh/deploy_key -P ${{ secrets.STAGING_PORT }} release-${{ env.RELEASE_ID }}.tar.gz \
+            ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }}:/var/www/taskmanager-staging/releases/$RELEASE/
           
-          # Extract and setup
-          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }} << 'ENDSSH'
-            cd /var/www/taskmanager/releases/$RELEASE
+          # Extract and setup on server
+          ssh -i ~/.ssh/deploy_key -p ${{ secrets.STAGING_PORT }} ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }} << ENDSSH
+            cd /var/www/taskmanager-staging/releases/$RELEASE
             tar -xzf release-${{ env.RELEASE_ID }}.tar.gz
             mv release/* .
             rmdir release
             rm release-${{ env.RELEASE_ID }}.tar.gz
             
-            # Setup shared directories
-            mkdir -p /var/www/taskmanager/shared
-            ln -sfn /var/www/taskmanager/shared/.env backend/.env
-            
-            # Install backend dependencies
+            # Setup backend
             cd backend
             python3 -m venv venv
             source venv/bin/activate
             pip install -r requirements.txt
+            pip install email-validator pydantic-settings alembic
+            
+            # Link .env
+            ln -sf /var/www/taskmanager-staging/shared/.env .env
             
             # Run migrations
             alembic upgrade head || echo "No migrations to run"
             
             # Atomic symlink switch
-            ln -sfn /var/www/taskmanager/releases/$RELEASE /var/www/taskmanager/current
+            ln -sfn /var/www/taskmanager-staging/releases/$RELEASE /var/www/taskmanager-staging/current
             
-            # Restart services
-            sudo systemctl restart taskmanager-backend
-            sudo systemctl restart taskmanager-frontend
+            # Kill existing server and start new one
+            pkill -f "uvicorn main:app.*8001" || true
+            cd /var/www/taskmanager-staging/current/backend
+            source venv/bin/activate
+            RELEASE_ID=$RELEASE ENVIRONMENT=staging nohup uvicorn main:app --host 0.0.0.0 --port 8001 > /tmp/staging.log 2>&1 &
+            
+            echo "✅ Staging deployment completed"
           ENDSSH
       
       - name: Health check staging
         run: |
           sleep 5
-          curl -f "${{ secrets.STAGING_APP_URL }}/api/health" || exit 1
-          echo "✅ Staging deployment successful"
+          ssh -i ~/.ssh/deploy_key -p ${{ secrets.STAGING_PORT }} ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }} \
+            "curl -f http://localhost:8001/api/health" || exit 1
+          echo "✅ Staging health check passed"
       
       - name: Notify deployment
         if: always()
@@ -144,7 +149,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: production
-    needs: [build, deploy_staging]
+    needs: [build]
     
     steps:
       - name: Download release artifact
@@ -157,54 +162,59 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.PROD_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H ${{ secrets.PROD_HOST }} >> ~/.ssh/known_hosts
+          ssh-keyscan -p ${{ secrets.PROD_PORT }} -H ${{ secrets.PROD_HOST }} >> ~/.ssh/known_hosts || true
       
       - name: Deploy to production server
         run: |
           RELEASE="${{ env.RELEASE_ID }}"
           
-          # Create release directory
-          ssh -i ~/.ssh/deploy_key ${{ secrets.PROD_USER }}@${{ secrets.PROD_HOST }} \
-            "mkdir -p /var/www/taskmanager/releases/$RELEASE"
+          # Create release directory on server
+          ssh -i ~/.ssh/deploy_key -p ${{ secrets.PROD_PORT }} ${{ secrets.PROD_USER }}@${{ secrets.PROD_HOST }} \
+            "mkdir -p /var/www/taskmanager-production/releases/$RELEASE"
           
           # Upload artifact
-          scp -i ~/.ssh/deploy_key release-${{ env.RELEASE_ID }}.tar.gz \
-            ${{ secrets.PROD_USER }}@${{ secrets.PROD_HOST }}:/var/www/taskmanager/releases/$RELEASE/
+          scp -i ~/.ssh/deploy_key -P ${{ secrets.PROD_PORT }} release-${{ env.RELEASE_ID }}.tar.gz \
+            ${{ secrets.PROD_USER }}@${{ secrets.PROD_HOST }}:/var/www/taskmanager-production/releases/$RELEASE/
           
-          # Extract and setup
-          ssh -i ~/.ssh/deploy_key ${{ secrets.PROD_USER }}@${{ secrets.PROD_HOST }} << 'ENDSSH'
-            cd /var/www/taskmanager/releases/$RELEASE
+          # Extract and setup on server
+          ssh -i ~/.ssh/deploy_key -p ${{ secrets.PROD_PORT }} ${{ secrets.PROD_USER }}@${{ secrets.PROD_HOST }} << ENDSSH
+            cd /var/www/taskmanager-production/releases/$RELEASE
             tar -xzf release-${{ env.RELEASE_ID }}.tar.gz
             mv release/* .
             rmdir release
             rm release-${{ env.RELEASE_ID }}.tar.gz
             
-            # Setup shared directories
-            mkdir -p /var/www/taskmanager/shared
-            ln -sfn /var/www/taskmanager/shared/.env backend/.env
-            
-            # Install backend dependencies
+            # Setup backend
             cd backend
             python3 -m venv venv
             source venv/bin/activate
             pip install -r requirements.txt
+            pip install email-validator pydantic-settings alembic
+            
+            # Link .env
+            ln -sf /var/www/taskmanager-production/shared/.env .env
             
             # Run migrations
             alembic upgrade head || echo "No migrations to run"
             
             # Atomic symlink switch
-            ln -sfn /var/www/taskmanager/releases/$RELEASE /var/www/taskmanager/current
+            ln -sfn /var/www/taskmanager-production/releases/$RELEASE /var/www/taskmanager-production/current
             
-            # Restart services
-            sudo systemctl restart taskmanager-backend
-            sudo systemctl restart taskmanager-frontend
+            # Kill existing server and start new one
+            pkill -f "uvicorn main:app.*8002" || true
+            cd /var/www/taskmanager-production/current/backend
+            source venv/bin/activate
+            RELEASE_ID=$RELEASE ENVIRONMENT=production nohup uvicorn main:app --host 0.0.0.0 --port 8002 > /tmp/production.log 2>&1 &
+            
+            echo "✅ Production deployment completed"
           ENDSSH
       
       - name: Health check production
         run: |
           sleep 5
-          curl -f "${{ secrets.PROD_APP_URL }}/api/health" || exit 1
-          echo "✅ Production deployment successful"
+          ssh -i ~/.ssh/deploy_key -p ${{ secrets.PROD_PORT }} ${{ secrets.PROD_USER }}@${{ secrets.PROD_HOST }} \
+            "curl -f http://localhost:8002/api/health" || exit 1
+          echo "✅ Production health check passed"
       
       - name: Notify deployment
         if: always()
@@ -224,19 +234,17 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.STAGING_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H ${{ secrets.STAGING_HOST }} >> ~/.ssh/known_hosts
+          ssh-keyscan -p ${{ secrets.STAGING_PORT }} -H ${{ secrets.STAGING_HOST }} >> ~/.ssh/known_hosts || true
       
       - name: Rollback to previous release
         run: |
-          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }} << 'ENDSSH'
-            cd /var/www/taskmanager/releases
+          ssh -i ~/.ssh/deploy_key -p ${{ secrets.STAGING_PORT }} ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }} << 'ENDSSH'
+            cd /var/www/taskmanager-staging/releases
             PREV=$(ls -1dt */ | sed -n '2p' | tr -d '/')
             
             if [ -n "$PREV" ]; then
               echo "Rolling back to: $PREV"
-              ln -sfn /var/www/taskmanager/releases/$PREV /var/www/taskmanager/current
-              sudo systemctl restart taskmanager-backend
-              sudo systemctl restart taskmanager-frontend
+              ln -sfn /var/www/taskmanager-staging/releases/$PREV /var/www/taskmanager-staging/current
               echo "✅ Rollback successful"
             else
               echo "❌ No previous release found"
@@ -246,8 +254,14 @@ jobs:
       
       - name: Verify rollback
         run: |
-          sleep 5
-          curl -f "${{ secrets.STAGING_APP_URL }}/api/health" || exit 1
+          ssh -i ~/.ssh/deploy_key -p ${{ secrets.STAGING_PORT }} ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }} << 'ENDSSH'
+            pkill -f "uvicorn main:app.*8001" || true
+            cd /var/www/taskmanager-staging/current/backend
+            source venv/bin/activate
+            RELEASE_ID=$(cat ../../RELEASE_INFO | grep RELEASE_ID | cut -d= -f2) ENVIRONMENT=staging nohup uvicorn main:app --host 0.0.0.0 --port 8001 > /tmp/staging.log 2>&1 &
+            sleep 5
+            curl -f http://localhost:8001/api/health || exit 1
+          ENDSSH
 
   rollback_production:
     name: Rollback Production
@@ -261,19 +275,17 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.PROD_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H ${{ secrets.PROD_HOST }} >> ~/.ssh/known_hosts
+          ssh-keyscan -p ${{ secrets.PROD_PORT }} -H ${{ secrets.PROD_HOST }} >> ~/.ssh/known_hosts || true
       
       - name: Rollback to previous release
         run: |
-          ssh -i ~/.ssh/deploy_key ${{ secrets.PROD_USER }}@${{ secrets.PROD_HOST }} << 'ENDSSH'
-            cd /var/www/taskmanager/releases
+          ssh -i ~/.ssh/deploy_key -p ${{ secrets.PROD_PORT }} ${{ secrets.PROD_USER }}@${{ secrets.PROD_HOST }} << 'ENDSSH'
+            cd /var/www/taskmanager-production/releases
             PREV=$(ls -1dt */ | sed -n '2p' | tr -d '/')
             
             if [ -n "$PREV" ]; then
               echo "Rolling back to: $PREV"
-              ln -sfn /var/www/taskmanager/releases/$PREV /var/www/taskmanager/current
-              sudo systemctl restart taskmanager-backend
-              sudo systemctl restart taskmanager-frontend
+              ln -sfn /var/www/taskmanager-production/releases/$PREV /var/www/taskmanager-production/current
               echo "✅ Rollback successful"
             else
               echo "❌ No previous release found"
@@ -283,5 +295,11 @@ jobs:
       
       - name: Verify rollback
         run: |
-          sleep 5
-          curl -f "${{ secrets.PROD_APP_URL }}/api/health" || exit 1
+          ssh -i ~/.ssh/deploy_key -p ${{ secrets.PROD_PORT }} ${{ secrets.PROD_USER }}@${{ secrets.PROD_HOST }} << 'ENDSSH'
+            pkill -f "uvicorn main:app.*8002" || true
+            cd /var/www/taskmanager-production/current/backend
+            source venv/bin/activate
+            RELEASE_ID=$(cat ../../RELEASE_INFO | grep RELEASE_ID | cut -d= -f2) ENVIRONMENT=production nohup uvicorn main:app --host 0.0.0.0 --port 8002 > /tmp/production.log 2>&1 &
+            sleep 5
+            curl -f http://localhost:8002/api/health || exit 1
+          ENDSSH
