@@ -112,7 +112,7 @@ jobs:
             python3 -m venv venv
             source venv/bin/activate
             pip install -r requirements.txt
-            pip install email-validator pydantic-settings alembic
+            pip install fastapi uvicorn sqlalchemy passlib python-jose bcrypt python-multipart email-validator pydantic-settings alembic
             
             # Link .env
             ln -sf /var/www/taskmanager-staging/shared/.env .env
@@ -189,7 +189,7 @@ jobs:
             python3 -m venv venv
             source venv/bin/activate
             pip install -r requirements.txt
-            pip install email-validator pydantic-settings alembic
+            pip install fastapi uvicorn sqlalchemy passlib python-jose bcrypt python-multipart email-validator pydantic-settings alembic
             
             # Link .env
             ln -sf /var/www/taskmanager-production/shared/.env .env
@@ -299,7 +299,7 @@ jobs:
             pkill -f "uvicorn main:app.*8002" || true
             cd /var/www/taskmanager-production/current/backend
             source venv/bin/activate
-            RELEASE_ID=$(cat ../../RELEASE_INFO | grep RELEASE_ID | cut -d= -f2) ENVIRONMENT=production nohup uvicorn main:app --host 0.0.0.0 --port 8002 > /tmp/production.log 2>&1 &
+            RELEASE_ID=$(cat ../../RELEASE_INFO | grep RELEASE_ID | cut -d= -f2) ENVIRONMENT=production nohup python -m uvicorn main:app --host 0.0.0.0 --port 8002 > /tmp/production.log 2>&1 &
             sleep 5
             curl -f http://localhost:8002/api/health || exit 1
           ENDSSH
